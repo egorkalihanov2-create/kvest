@@ -22,12 +22,12 @@ GITHUB_RAW = "https://raw.githubusercontent.com/egorkalihanov2-create/kvest/main
 # ── FSM ──────────────────────────────────────────────────────────────────────
 
 class QuestState(StatesGroup):
-    waiting_step3_button   = State()   # ждём кнопку "да мне ничего не нужно..."
-    waiting_item_choice    = State()   # ждём нажатие на газету/журнал/игрушку
-    waiting_no_button      = State()   # ждём кнопку "нет, все-таки ничего не надо..."
-    waiting_riddle_choice  = State()   # ждём выбор загадки (шаг 6)
-    waiting_riddle_answer  = State()   # ждём ответ на загадку
-    waiting_final_answer   = State()   # ждём "Амели"
+    waiting_step3_button   = State()
+    waiting_item_choice    = State()
+    waiting_no_button      = State()
+    waiting_riddle_choice  = State()
+    waiting_riddle_answer  = State()
+    waiting_final_answer   = State()
 
 # ── Keyboards ────────────────────────────────────────────────────────────────
 
@@ -72,16 +72,39 @@ def kb_riddles(pressed: set) -> InlineKeyboardMarkup:
 def github_url(filename: str) -> str:
     return GITHUB_RAW + filename
 
+def get_keys_grid(mid_text=""):
+    """
+    Генерирует сетку кастомных эмодзи в формате HTML.
+    Используются ваши custom_emoji_id.
+    """
+    e1 = '<tg-emoji emoji-id="5233552606638413980">🗝</tg-emoji>'
+    e2 = '<tg-emoji emoji-id="5235974190804278599">🗝</tg-emoji>'
+    e3 = '<tg-emoji emoji-id="5235523090389182893">🗝</tg-emoji>'
+    
+    e4 = '<tg-emoji emoji-id="5233267614083488173">🗝</tg-emoji>'
+    e5 = '<tg-emoji emoji-id="5233679372598155360">🗝</tg-emoji>'
+    e6 = '<tg-emoji emoji-id="5235548198767992433">🗝</tg-emoji>'
+    
+    e7 = '<tg-emoji emoji-id="5233639502416745558">🗝</tg-emoji>'
+    e8 = '<tg-emoji emoji-id="5233372183652243957">🗝</tg-emoji>'
+    e9 = '<tg-emoji emoji-id="5235492243934057368">🗝</tg-emoji>'
+
+    row1 = f"{e1}{e2}{e3}"
+    row2 = f"{e4}{e5}{e6}" + (f"  {mid_text}" if mid_text else "")
+    row3 = f"{e7}{e8}{e9}"
+    
+    return f"{row1}\n{row2}\n{row3}"
+
 async def send_photo_from_github(bot: Bot, chat_id: int, filename: str,
                                   caption: str, caption_entities=None,
-                                  reply_markup=None):
-    """Отправляет фото, скачивая его с GitHub по URL."""
+                                  reply_markup=None, parse_mode=None):
     url = github_url(filename)
     await bot.send_photo(
         chat_id=chat_id,
         photo=url,
         caption=caption,
         caption_entities=caption_entities,
+        parse_mode=parse_mode,
         reply_markup=reply_markup,
     )
 
@@ -91,7 +114,6 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     chat_id = message.chat.id
 
-    # Сообщение 1 — blockquote + italic
     await message.bot.send_message(
         chat_id,
         "Здраавствуйте, девушка",
@@ -103,7 +125,6 @@ async def cmd_start(message: Message, state: FSMContext):
 
     await asyncio.sleep(5)
 
-    # Сообщение 2
     await message.bot.send_message(
         chat_id,
         "Де-евушка!",
@@ -115,44 +136,36 @@ async def cmd_start(message: Message, state: FSMContext):
 
     await asyncio.sleep(5)
 
-    # Сообщение 3 — first.png + caption + кнопка reply
     caption3 = (
-        "🗝🗝🗝\n"
-        "🗝🗝🗝  Не слышите что-ли!\n"
-        "🗝🗝🗝\n"
-        "газеты, журналы, игрушки… ло-те-ре-йки) вам чего?"
+        f"{get_keys_grid('Не слышите что-ли!')}\n\n"
+        f"газеты, журналы, игрушки… ло-те-ре-йки) вам чего?"
     )
     await send_photo_from_github(
         message.bot, chat_id,
         "first.png",
         caption=caption3,
+        parse_mode="HTML",
         reply_markup=kb_nothing(),
     )
     await state.set_state(QuestState.waiting_step3_button)
 
 
 async def on_nothing_button(message: Message, state: FSMContext):
-    """Шаг 4: пользователь нажал 'да мне ничего не нужно...'"""
     chat_id = message.chat.id
 
-    caption4 = (
-        "🗝🗝🗝\n"
-        "🗝🗝🗝  А вы посмотрите...\n"
-        "🗝🗝🗝"
-    )
+    caption4 = get_keys_grid('А вы посмотрите...')
+    
     await send_photo_from_github(
         message.bot, chat_id,
         "second.png",
         caption=caption4,
+        parse_mode="HTML",
         reply_markup=kb_items(),
     )
     await state.set_state(QuestState.waiting_item_choice)
 
 
 async def on_item_callback(callback: CallbackQuery, state: FSMContext):
-    """Реакция на нажатие газета/журнал/игрушка."""
-    await callback.answer()
-
     texts = {
         "item_newspaper": (
             'Перед вами газета "САРАТОВСКИЙ СПЛЕТНИК".\n\n'
@@ -177,9 +190,15 @@ async def on_item_callback(callback: CallbackQuery, state: FSMContext):
         ),
     }
 
-    await callback.message.answer(texts[callback.data])
+    alert_text = texts[callback.data]
+    
+    # Лимит Telegram для show_alert = 200 символов. 
+    # Обрезаем текст, чтобы бот не выдавал ошибку Bad Request.
+    if len(alert_text) > 200:
+        alert_text = alert_text[:197] + "..."
 
-    # Показываем кнопку "нет, все-таки ничего не надо..."
+    await callback.answer(text=alert_text, show_alert=True)
+
     await callback.message.answer(
         ".",
         reply_markup=kb_no_need(),
@@ -188,25 +207,22 @@ async def on_item_callback(callback: CallbackQuery, state: FSMContext):
 
 
 async def on_no_need_button(message: Message, state: FSMContext):
-    """Шаг 5: пользователь нажал 'нет, все-таки ничего не надо...'"""
     chat_id = message.chat.id
 
     caption5 = (
-        "🗝🗝🗝\n"
-        "🗝🗝🗝  Ну ничем не угодишь!\n"
-        "🗝🗝🗝\n"
-        "хотя знаешь, кое-что у меня наверное есть..."
+        f"{get_keys_grid('Ну ничем не угодишь!')}\n\n"
+        f"хотя знаешь, кое-что у меня наверное есть..."
     )
     await send_photo_from_github(
         message.bot, chat_id,
         "third.png",
         caption=caption5,
+        parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
 
     await asyncio.sleep(5)
 
-    # Шаг 6 — «Ну что, с какого начнешь?»
     await state.update_data(pressed=[], current_riddle=None)
     await message.bot.send_message(
         chat_id,
@@ -263,21 +279,18 @@ async def on_riddle_answer(message: Message, state: FSMContext):
         await state.update_data(pressed=pressed, current_riddle=None)
 
         if len(pressed) == 4:
-            # Все 4 загадки решены
             await message.answer(
                 "Получается А  ЕЛИ... Что же пропущено?",
                 reply_markup=ReplyKeyboardRemove(),
             )
             await state.set_state(QuestState.waiting_final_answer)
         else:
-            # Обновляем клавиатуру с галочками и возвращаемся к выбору
             await message.answer(
                 "Ну что, с какого начнешь?",
                 reply_markup=kb_riddles(set(pressed)),
             )
             await state.set_state(QuestState.waiting_riddle_choice)
     else:
-        # Неверный ответ — остаёмся в состоянии ожидания ответа
         pass
 
 
@@ -296,41 +309,33 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp  = Dispatcher(storage=MemoryStorage())
 
-    # Start
     dp.message.register(cmd_start, CommandStart())
 
-    # Шаг 3 → 4: кнопка reply
     dp.message.register(
         on_nothing_button,
         QuestState.waiting_step3_button,
         F.text == "да мне ничего не нужно...",
     )
 
-    # Шаг 4: inline-кнопки товаров
     dp.callback_query.register(
         on_item_callback,
         QuestState.waiting_item_choice,
         F.data.in_({"item_newspaper", "item_magazine", "item_toy"}),
     )
 
-    # Шаг 4 → 5: кнопка reply
     dp.message.register(
         on_no_need_button,
         QuestState.waiting_no_button,
         F.text == "нет, все-таки ничего не надо...",
     )
 
-    # Шаг 6: выбор загадки
     dp.callback_query.register(
         on_riddle_choice,
         QuestState.waiting_riddle_choice,
         F.data.in_({"riddle_lane", "riddle_1s1s", "riddle_please", "riddle_mischief"}),
     )
 
-    # Шаг 6: ответ на загадку
     dp.message.register(on_riddle_answer, QuestState.waiting_riddle_answer)
-
-    # Финальный ответ
     dp.message.register(on_final_answer, QuestState.waiting_final_answer)
 
     logger.info("Bot started")
